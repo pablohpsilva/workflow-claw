@@ -196,3 +196,56 @@ test("workflow canvas shows arrows and persists drag layout", async ({ page }) =
   if (!persistedPos) throw new Error(`Unexpected transform format: ${persistedTransform}`);
   expect(Math.abs(persistedPos.x - movedPos.x)).toBeLessThan(2);
 });
+
+test("edit step from list populates form and saves updates", async ({ page }) => {
+  const suffix = Date.now().toString();
+  const projectPath = ensureProjectFolder(`edit-${suffix}`);
+  const projectLabel = `Edit Project ${suffix}`;
+  const workflowName = `Edit Workflow ${suffix}`;
+  const providerName = `Edit Provider ${suffix}`;
+
+  await page.goto("/");
+  await ensureVaultUnlocked(page);
+
+  await page.getByTestId("provider-open-add").click();
+  await page.getByTestId("provider-name-input").fill(providerName);
+  await page.getByTestId("provider-cli-input").fill("/bin/bash");
+  await page.getByTestId("provider-template-input").fill(
+    "-lc \"printf '{\\\"status\\\":\\\"success\\\",\\\"summary\\\":\\\"ok\\\",\\\"files_modified\\\":[],\\\"checks\\\":[],\\\"next_actions\\\":[]}' # {{prompt}}\""
+  );
+  await page.getByTestId("provider-save").click();
+  await expect(page.getByTestId("provider-list")).toContainText(providerName);
+
+  await page.getByTestId("folder-open-add").click();
+  await page.getByTestId("folder-label-input").fill(projectLabel);
+  await page.getByTestId("folder-path-input").fill(projectPath);
+  await page.getByTestId("folder-save").click();
+  await expect(page.getByTestId("folder-list")).toContainText(projectLabel);
+
+  await page.getByTestId("workflow-name-input").fill(workflowName);
+  await page.getByTestId("workflow-description-input").fill("Edit flow");
+  await page.getByTestId("workflow-folder-select").selectOption({ label: projectPath });
+  await page.getByTestId("workflow-create").click();
+  await page.getByTestId("workflow-list").getByText(workflowName).click();
+
+  await page.getByTestId("step-name-input").fill("Plan");
+  await page.getByTestId("step-description-input").fill("Generate plan");
+  await page.getByTestId("step-provider-select").selectOption({ label: providerName });
+  await page.getByTestId("step-add").click();
+  await expect(page.getByTestId("steps-list")).toContainText("Plan");
+
+  await page.getByTestId("steps-list").getByText("Plan", { exact: true }).click();
+  await expect(page.getByTestId("step-name-input")).toHaveValue("Plan");
+  await expect(page.getByTestId("step-description-input")).toHaveValue("Generate plan");
+
+  await page.getByTestId("step-name-input").fill("Plan Updated");
+  await page.getByTestId("step-description-input").fill("Updated desc");
+
+  const [updateResponse] = await Promise.all([
+    page.waitForResponse((res) => res.url().includes("/api/steps/") && res.request().method() === "PUT"),
+    page.getByTestId("step-add").click()
+  ]);
+  expect(updateResponse.ok()).toBeTruthy();
+  await expect(page.getByTestId("steps-list")).toContainText("Plan Updated");
+  await expect(page.getByTestId("step-name-input")).toHaveValue("");
+});

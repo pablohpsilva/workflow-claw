@@ -23,7 +23,7 @@ export default function CanvasSection({
   onEdgesChange,
   onConnect,
   configLocked,
-  setSelectedStepId
+  onNodeClick
 }: {
   nodes: Node[];
   flowEdges: Edge[];
@@ -33,7 +33,7 @@ export default function CanvasSection({
   onEdgesChange: OnEdgesChange;
   onConnect: (connection: Connection) => void;
   configLocked: boolean;
-  setSelectedStepId: (id: string) => void;
+  onNodeClick: (nodeId: string) => void;
 }) {
   return (
     <Section title="Workflow Canvas" testId="section-canvas">
@@ -49,7 +49,7 @@ export default function CanvasSection({
           onConnect={onConnect}
           nodesDraggable={!configLocked}
           nodesConnectable={!configLocked}
-          onNodeClick={(_, node) => setSelectedStepId(node.id)}
+          onNodeClick={(_, node) => onNodeClick(node.id)}
           fitView
         >
           <Background data-testid="canvas-background" gap={24} size={1} />

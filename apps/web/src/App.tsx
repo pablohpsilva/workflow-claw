@@ -77,6 +77,7 @@ export default function App() {
   const [steps, setSteps] = useState<Step[]>([]);
   const [edges, setEdges] = useState<EdgeRecord[]>([]);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<string>("");
   const [runSteps, setRunSteps] = useState<any[]>([]);
@@ -116,6 +117,46 @@ export default function App() {
   const [goalText, setGoalText] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const configLocked = !vaultUnlocked;
+
+  function resetStepForm() {
+    setStepName("");
+    setStepDescription("");
+    setStepProviderId("");
+    setStepModel("");
+    setStepIterations("10");
+    setStepSkills("");
+    setStepSuccess("");
+    setStepFailure("");
+  }
+
+  function parseStepSkills(step: Step) {
+    if (!step.skills_json) return [];
+    try {
+      const parsed = JSON.parse(step.skills_json);
+      return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function beginEditStep(step: Step) {
+    setSelectedStepId(step.id);
+    setEditingStepId(step.id);
+    setStepName(step.name);
+    setStepDescription(step.description);
+    setStepProviderId(step.provider_id);
+    setStepModel(step.model ?? "");
+    setStepIterations(String(step.max_iterations ?? 10));
+    setStepSkills(parseStepSkills(step).join(", "));
+    setStepSuccess(step.success_criteria ?? "");
+    setStepFailure(step.failure_criteria ?? "");
+  }
+
+  function clearStepSelection() {
+    setSelectedStepId(null);
+    setEditingStepId(null);
+    resetStepForm();
+  }
 
   useEffect(() => {
     refreshAll();
@@ -325,6 +366,7 @@ export default function App() {
       setSelectedWorkflowId(id);
       setSteps(data.steps);
       setEdges(data.edges);
+      clearStepSelection();
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -351,15 +393,34 @@ export default function App() {
         posX: Math.random() * 300,
         posY: Math.random() * 200
       });
-      setStepName("");
-      setStepDescription("");
-      setStepProviderId("");
-      setStepModel("");
-      setStepIterations("10");
-      setStepSkills("");
-      setStepSuccess("");
-      setStepFailure("");
+      resetStepForm();
       await loadWorkflow(selectedWorkflowId);
+    } catch (err) {
+      setErrorMessage((err as Error).message);
+    }
+  }
+
+  async function handleUpdateStep() {
+    if (!editingStepId) return;
+    if (configLocked) return;
+    setErrorMessage("");
+    try {
+      await updateStep(editingStepId, {
+        name: stepName,
+        description: stepDescription,
+        providerId: stepProviderId,
+        model: stepModel || null,
+        maxIterations: Number(stepIterations || 10),
+        skills: stepSkills
+          .split(",")
+          .map((skill) => skill.trim())
+          .filter(Boolean),
+        successCriteria: stepSuccess || null,
+        failureCriteria: stepFailure || null
+      });
+      setEditingStepId(null);
+      resetStepForm();
+      if (selectedWorkflowId) await loadWorkflow(selectedWorkflowId);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -380,7 +441,7 @@ export default function App() {
     setErrorMessage("");
     try {
       await deleteStep(id);
-      if (selectedStepId === id) setSelectedStepId(null);
+      if (selectedStepId === id) clearStepSelection();
       if (selectedWorkflowId) await loadWorkflow(selectedWorkflowId);
     } catch (err) {
       setErrorMessage((err as Error).message);
@@ -479,6 +540,11 @@ export default function App() {
     }),
     []
   );
+
+  const isEditingStep = Boolean(editingStepId);
+  const stepFormTitle = isEditingStep ? "Edit Step" : "Add Step";
+  const stepPrimaryLabel = isEditingStep ? "Save Step" : "Add Step";
+  const stepPrimaryAction = isEditingStep ? handleUpdateStep : handleCreateStep;
 
   const onNodesChange: OnNodesChange = (changes: NodeChange[]) => {
     if (configLocked) return;
@@ -608,10 +674,14 @@ export default function App() {
             setStepSuccess={setStepSuccess}
             stepFailure={stepFailure}
             setStepFailure={setStepFailure}
-            handleCreateStep={handleCreateStep}
+            stepFormTitle={stepFormTitle}
+            isEditingStep={isEditingStep}
+            stepPrimaryLabel={stepPrimaryLabel}
+            stepPrimaryAction={stepPrimaryAction}
+            cancelStepEdit={clearStepSelection}
             steps={steps}
             selectedStepId={selectedStepId}
-            setSelectedStepId={setSelectedStepId}
+            beginEditStep={beginEditStep}
             handleDeleteStep={handleDeleteStep}
             providers={providers}
             configLocked={configLocked}
@@ -640,7 +710,10 @@ export default function App() {
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
             configLocked={configLocked}
-            setSelectedStepId={setSelectedStepId}
+            onNodeClick={(nodeId) => {
+              const step = steps.find((item) => item.id === nodeId);
+              if (step) beginEditStep(step);
+            }}
           />
 
           <RunSection

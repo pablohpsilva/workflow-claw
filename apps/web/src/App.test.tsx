@@ -28,10 +28,12 @@ vi.mock("reactflow", async () => {
 
 function mockFetch({
   initialUnlocked = false,
+  providers = [],
   workflows = [],
   workflowDetails = {}
 }: {
   initialUnlocked?: boolean;
+  providers?: any[];
   workflows?: any[];
   workflowDetails?: Record<string, { workflow: any; steps: any[]; edges: any[] }>;
 } = {}) {
@@ -48,7 +50,7 @@ function mockFetch({
       return new Response(JSON.stringify({ unlocked }), { status: 200 });
     }
     if (url.endsWith("/api/providers")) {
-      return new Response(JSON.stringify([]), { status: 200 });
+      return new Response(JSON.stringify(providers), { status: 200 });
     }
     if (url.endsWith("/api/folders")) {
       return new Response(JSON.stringify([]), { status: 200 });
@@ -190,6 +192,94 @@ describe("App", () => {
     await waitFor(() => {
       expect(lastEdges.length).toBeGreaterThan(0);
       expect(lastEdges[0].markerEnd?.type).toBe("arrowclosed");
+    });
+  });
+
+  it("populates step form on click and updates step", async () => {
+    const workflow = {
+      id: "wf-1",
+      name: "Edit Workflow",
+      description: null,
+      folder_id: "folder-1",
+      execution_mode: "sequential"
+    };
+    const providers = [
+      {
+        id: "prov-1",
+        name: "Provider One",
+        cliCommand: "run",
+        template: "{{prompt}}",
+        defaultModel: null,
+        createdAt: "now",
+        updatedAt: "now",
+        hasEnv: false
+      }
+    ];
+    mockFetch({
+      initialUnlocked: true,
+      providers,
+      workflows: [workflow],
+      workflowDetails: {
+        "wf-1": {
+          workflow,
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: "Plan",
+              description: "Plan step",
+              provider_id: "prov-1",
+              model: null,
+              max_iterations: 12,
+              skills_json: "[\"alpha\",\"beta\"]",
+              success_criteria: "Ship it",
+              failure_criteria: null,
+              pos_x: 10,
+              pos_y: 10
+            }
+          ],
+          edges: []
+        }
+      }
+    });
+
+    render(<App />);
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    await userEvent.click(screen.getByTestId("workflow-card-wf-1-select"));
+    await userEvent.click(screen.getByTestId("step-card-step-1-select"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("step-name-input")).toHaveValue("Plan");
+      expect(screen.getByTestId("step-description-input")).toHaveValue("Plan step");
+      expect(screen.getByTestId("step-provider-select")).toHaveValue("prov-1");
+      expect(screen.getByTestId("step-iterations-input")).toHaveValue("12");
+      expect(screen.getByTestId("step-skills-input")).toHaveValue("alpha, beta");
+      expect(screen.getByTestId("step-success-input")).toHaveValue("Ship it");
+    });
+
+    await userEvent.clear(screen.getByTestId("step-name-input"));
+    await userEvent.type(screen.getByTestId("step-name-input"), "Plan Updated");
+    await userEvent.clear(screen.getByTestId("step-description-input"));
+    await userEvent.type(screen.getByTestId("step-description-input"), "Updated desc");
+    await userEvent.click(screen.getByTestId("step-add"));
+
+    await waitFor(() => {
+      const updateCall = (global.fetch as any).mock.calls.find(
+        ([url, options]: [string, RequestInit]) =>
+          url === "/api/steps/step-1" && options?.method === "PUT"
+      );
+      expect(updateCall).toBeTruthy();
+      const body = JSON.parse((updateCall[1] as RequestInit).body as string);
+      expect(body).toMatchObject({
+        name: "Plan Updated",
+        description: "Updated desc",
+        providerId: "prov-1"
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("step-name-input")).toHaveValue("");
+      expect(screen.getByTestId("step-description-input")).toHaveValue("");
     });
   });
 });

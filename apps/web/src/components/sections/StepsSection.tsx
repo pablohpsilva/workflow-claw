@@ -25,10 +25,14 @@ export default function StepsSection({
   setStepSuccess,
   stepFailure,
   setStepFailure,
-  handleCreateStep,
+  stepFormTitle,
+  isEditingStep,
+  stepPrimaryLabel,
+  stepPrimaryAction,
+  cancelStepEdit,
   steps,
   selectedStepId,
-  setSelectedStepId,
+  beginEditStep,
   handleDeleteStep,
   providers,
   configLocked
@@ -49,10 +53,14 @@ export default function StepsSection({
   setStepSuccess: (value: string) => void;
   stepFailure: string;
   setStepFailure: (value: string) => void;
-  handleCreateStep: () => void;
+  stepFormTitle: string;
+  isEditingStep: boolean;
+  stepPrimaryLabel: string;
+  stepPrimaryAction: () => void;
+  cancelStepEdit: () => void;
   steps: Step[];
   selectedStepId: string | null;
-  setSelectedStepId: (id: string) => void;
+  beginEditStep: (step: Step) => void;
   handleDeleteStep: (id: string) => void;
   providers: Provider[];
   configLocked: boolean;
@@ -61,6 +69,7 @@ export default function StepsSection({
     <Section title="Steps" testId="section-steps">
       <div data-testid="steps-grid" className="grid gap-4 md:grid-cols-2">
         <div data-testid="steps-form" className="space-y-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate/50">{stepFormTitle}</p>
           <Field
             label="Step Name"
             value={stepName}
@@ -120,7 +129,22 @@ export default function StepsSection({
             testId="step-failure"
             disabled={configLocked}
           />
-          <PrimaryButton label="Add Step" onClick={handleCreateStep} testId="step-add" disabled={configLocked} />
+          <div className="flex items-center gap-2">
+            <PrimaryButton
+              label={stepPrimaryLabel}
+              onClick={stepPrimaryAction}
+              testId="step-add"
+              disabled={configLocked}
+            />
+            {isEditingStep && (
+              <GhostButton
+                label="Cancel"
+                onClick={cancelStepEdit}
+                testId="step-cancel-edit"
+                disabled={configLocked}
+              />
+            )}
+          </div>
         </div>
         <div data-testid="steps-list" className="space-y-2">
           {steps.map((step) => (
@@ -133,7 +157,7 @@ export default function StepsSection({
             >
               <button
                 data-testid={`step-card-${step.id}-select`}
-                onClick={() => setSelectedStepId(step.id)}
+                onClick={() => beginEditStep(step)}
                 className="w-full text-left"
               >
                 <p data-testid={`step-card-${step.id}-name`} className="text-sm font-semibold">
