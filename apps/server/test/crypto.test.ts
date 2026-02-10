@@ -28,4 +28,15 @@ describe("crypto vault", () => {
     const ok = cryptoModule2.unlock("wrong");
     expect(ok).toBe(false);
   });
+
+  it("locks the vault and clears the active key", async () => {
+    const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "vault-"));
+    const cryptoModule = await loadCryptoWithHome(tempHome);
+    expect(cryptoModule.isUnlocked()).toBe(false);
+    cryptoModule.unlock("pass123");
+    expect(cryptoModule.isUnlocked()).toBe(true);
+    cryptoModule.lock();
+    expect(cryptoModule.isUnlocked()).toBe(false);
+    expect(() => cryptoModule.encryptSecret("hello")).toThrow("Vault locked");
+  });
 });

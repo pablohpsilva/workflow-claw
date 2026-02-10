@@ -5,8 +5,10 @@ import ReactFlow, {
   MiniMap,
   Node,
   Edge,
+  Handle,
+  MarkerType,
+  Position,
   Connection,
-  addEdge,
   OnNodesChange,
   OnEdgesChange,
   NodeChange,
@@ -431,13 +433,28 @@ function GhostButton({
 
 function StepNode({ data }: { data: { name: string; provider: string; status?: string } }) {
   return (
-    <div data-testid={`node-${data.name}`} className="flex flex-col gap-1">
-      <p data-testid={`node-${data.name}-title`} className="text-sm font-semibold text-slate/90">
-        {data.name}
-      </p>
-      <p data-testid={`node-${data.name}-provider`} className="text-xs text-slate/60">
-        {data.provider}
-      </p>
+    <div
+      data-testid={`node-${data.name}`}
+      className="relative min-w-[140px] rounded-xl border border-slate/200 bg-white px-3 py-2 shadow-sm"
+    >
+      <Handle
+        type="target"
+        position={Position.Left}
+        className="h-2 w-2 border-2 border-white bg-slate-400"
+      />
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="h-2 w-2 border-2 border-white bg-slate-400"
+      />
+      <div className="flex flex-col gap-1">
+        <p data-testid={`node-${data.name}-title`} className="text-sm font-semibold text-slate/90">
+          {data.name}
+        </p>
+        <p data-testid={`node-${data.name}-provider`} className="text-xs text-slate/60">
+          {data.provider}
+        </p>
+      </div>
     </div>
   );
 }
@@ -782,6 +799,7 @@ export default function App() {
   }
 
   async function handleDeleteEdge(edgeId: string) {
+    if (configLocked) return;
     setErrorMessage("");
     try {
       await deleteEdge(edgeId);
@@ -839,7 +857,10 @@ export default function App() {
         id: edge.id,
         source: edge.from_step_id,
         target: edge.to_step_id,
-        style
+        style,
+        markerEnd: {
+          type: MarkerType.ArrowClosed
+        }
       } as Edge;
     });
   }, [edges]);
@@ -848,15 +869,34 @@ export default function App() {
     default: StepNode
   }), []);
 
-  const onNodesChange: OnNodesChange = async (changes: NodeChange[]) => {
-    for (const change of changes) {
-      if (change.type === "position" && change.position && change.id) {
-        await handleUpdateStepPosition(change.id, change.position.x, change.position.y);
-      }
-    }
+  const onNodesChange: OnNodesChange = (changes: NodeChange[]) => {
+    if (configLocked) return;
+    const positionChanges = changes.filter(
+      (change) => change.type === "position" && !!change.position && !!change.id
+    ) as Array<NodeChange & { position: { x: number; y: number } }>;
+    if (positionChanges.length === 0) return;
+
+    const changeMap = new Map(positionChanges.map((change) => [change.id, change.position]));
+    setSteps((prev) =>
+      prev.map((step) => {
+        const position = changeMap.get(step.id);
+        if (!position) return step;
+        return {
+          ...step,
+          pos_x: position.x,
+          pos_y: position.y
+        };
+      })
+    );
+  };
+
+  const onNodeDragStop = async (_: React.MouseEvent | React.TouchEvent, node: Node) => {
+    if (configLocked) return;
+    await handleUpdateStepPosition(node.id, node.position.x, node.position.y);
   };
 
   const onEdgesChange: OnEdgesChange = async (changes: EdgeChange[]) => {
+    if (configLocked) return;
     for (const change of changes) {
       if (change.type === "remove" && change.id) {
         await handleDeleteEdge(change.id);
@@ -865,6 +905,7 @@ export default function App() {
   };
 
   const onConnect = async (connection: Connection) => {
+    if (configLocked) return;
     if (!selectedWorkflowId || !connection.source || !connection.target) return;
     await createEdge({
       workflowId: selectedWorkflowId,
@@ -876,6 +917,10 @@ export default function App() {
   };
 
   const selectedStep = steps.find((step) => step.id === selectedStepId) || null;
+  const providerModalTitle = editingProviderId ? "Edit Provider" : "Add Provider";
+  const providerSaveLabel = editingProviderId ? "Save Provider" : "Add Provider";
+  const folderModalTitle = editingFolderId ? "Edit Folder" : "Add Folder";
+  const folderSaveLabel = editingFolderId ? "Save Folder" : "Add Folder";
 
   return (
     <div data-testid="app-root" className="min-h-screen">
@@ -892,9 +937,10 @@ export default function App() {
           </p>
         </div>
         <div data-testid="header-right" className="flex items-center gap-2">
-          <span data-testid="header-lock" className="rounded-full border border-slate/20 px-3 py-1 text-xs">
-            Vault: {unlocked ? "Unlocked" : "Locked"}
+          <span data-testid="header-lock-label" className="text-xs font-semibold uppercase tracking-[0.2em] text-slate/50">
+            Vault
           </span>
+          <VaultStatusPill unlocked={vaultUnlocked} />
         </div>
       </header>
 
@@ -903,114 +949,170 @@ export default function App() {
         className="grid gap-6 px-8 py-8 lg:grid-cols-[360px_1fr]"
       >
         <aside data-testid="sidebar" className="space-y-6">
-          <Section title="Vault Unlock" testId="section-vault">
-            <Field
-              label="Passphrase"
-              value={passphrase}
-              onChange={setPassphrase}
-              placeholder="Enter vault passphrase"
-              testId="vault-passphrase"
-              type="password"
-            />
-            <PrimaryButton label="Unlock" onClick={handleUnlock} testId="vault-unlock-button" />
+          <Section title="Vault" testId="section-vault">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate/80">Vault status</p>
+                <p data-testid="vault-description" className="text-xs text-slate/60">
+                  Unlock to edit providers, folders, and workflows. You can still run workflows while locked.
+                </p>
+              </div>
+              <VaultStatusPill unlocked={vaultUnlocked} />
+            </div>
+            {!vaultUnlocked ? (
+              <>
+                <Field
+                  label="Passphrase"
+                  value={passphrase}
+                  onChange={setPassphrase}
+                  placeholder="Enter vault passphrase"
+                  testId="vault-passphrase"
+                  type="password"
+                />
+                <PrimaryButton label="Unlock Vault" onClick={handleUnlock} testId="vault-unlock-button" />
+              </>
+            ) : (
+              <GhostButton label="Lock Vault" onClick={handleLock} testId="vault-lock-button" />
+            )}
           </Section>
 
-          <Section title="Provider Setup" testId="section-providers">
-            <SelectField
-              label="Preset"
-              value={providerPresetKey}
-              onChange={(value) => setProviderPresetKey(value as "claude" | "codex")}
-              options={[
-                { label: "Claude Code", value: "claude" },
-                { label: "OpenAI Codex", value: "codex" }
-              ]}
-              testId="provider-preset"
-            />
-            <Field label="Name" value={providerName} onChange={setProviderName} testId="provider-name" />
-            <Field label="CLI Command" value={providerCli} onChange={setProviderCli} testId="provider-cli" />
-            <TextArea
-              label="Command Template"
-              value={providerTemplate}
-              onChange={setProviderTemplate}
-              placeholder='--model {{model}} --prompt "{{prompt}}"'
-              testId="provider-template"
-            />
-            <Field
-              label="Default Model"
-              value={providerModel}
-              onChange={setProviderModel}
-              placeholder="Leave empty for CLI default"
-              testId="provider-model"
-            />
-            <TextArea
-              label="Env Vars (JSON)"
-              value={providerEnvJson}
-              onChange={setProviderEnvJson}
-              placeholder='{\"KEY\":\"value\"}'
-              testId="provider-env"
-            />
-            <PrimaryButton label="Add Provider" onClick={handleCreateProvider} testId="provider-add" />
+          {configLocked && (
+            <div
+              data-testid="vault-locked-banner"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800"
+            >
+              Vault locked. Unlock to edit configurations.
+            </div>
+          )}
+
+          <Section title="Providers" testId="section-providers">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate/80">Providers</p>
+                <p className="text-xs text-slate/60">Add providers to power your workflows.</p>
+              </div>
+              <PrimaryButton
+                label="Add Provider"
+                onClick={openAddProviderModal}
+                testId="provider-open-add"
+                disabled={configLocked}
+              />
+            </div>
             <div data-testid="provider-list" className="space-y-2">
-              {providers.map((provider) => (
-                <div
-                  data-testid={`provider-card-${provider.id}`}
-                  key={provider.id}
-                  className="rounded-lg border border-slate/10 bg-white p-3"
-                >
-                  <p data-testid={`provider-card-${provider.id}-name`} className="text-sm font-semibold">
-                    {provider.name}
-                  </p>
-                  <p data-testid={`provider-card-${provider.id}-cli`} className="text-xs text-slate/60">
-                    {provider.cliCommand}
-                  </p>
-                  <GhostButton
-                    label="Delete"
-                    onClick={() => handleDeleteProvider(provider.id)}
-                    testId={`provider-card-${provider.id}-delete`}
-                  />
-                </div>
-              ))}
+              {providers.length === 0 ? (
+                <EmptyState
+                  title="No providers yet"
+                  description="Add your first provider to start building workflows."
+                  testId="provider-empty-state"
+                />
+              ) : (
+                providers.map((provider) => (
+                  <div
+                    data-testid={`provider-card-${provider.id}`}
+                    key={provider.id}
+                    className="rounded-lg border border-slate/10 bg-white p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p data-testid={`provider-card-${provider.id}-name`} className="text-sm font-semibold">
+                          {provider.name}
+                        </p>
+                        <p data-testid={`provider-card-${provider.id}-cli`} className="text-xs text-slate/60">
+                          {provider.cliCommand}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <GhostButton
+                          label="Edit"
+                          onClick={() => openEditProviderModal(provider)}
+                          testId={`provider-card-${provider.id}-edit`}
+                          disabled={configLocked}
+                        />
+                        <GhostButton
+                          label="Delete"
+                          onClick={() => handleDeleteProvider(provider.id)}
+                          testId={`provider-card-${provider.id}-delete`}
+                          disabled={configLocked}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </Section>
 
           <Section title="Project Folders" testId="section-folders">
-            <Field
-              label="Folder Path"
-              value={folderPath}
-              onChange={setFolderPath}
-              placeholder="/path/to/project"
-              testId="folder-path"
-            />
-            <Field
-              label="Label"
-              value={folderLabel}
-              onChange={setFolderLabel}
-              placeholder="Optional label"
-              testId="folder-label"
-            />
-            <PrimaryButton label="Add Folder" onClick={handleCreateFolder} testId="folder-add" />
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-slate/80">Folders</p>
+                <p className="text-xs text-slate/60">Organize workflows by project folder.</p>
+              </div>
+              <PrimaryButton
+                label="Add Folder"
+                onClick={openAddFolderModal}
+                testId="folder-open-add"
+                disabled={configLocked}
+              />
+            </div>
             <div data-testid="folder-list" className="space-y-2">
-              {folders.map((folder) => (
-                <div
-                  data-testid={`folder-card-${folder.id}`}
-                  key={folder.id}
-                  className="rounded-lg border border-slate/10 bg-white p-3"
-                >
-                  <p data-testid={`folder-card-${folder.id}-path`} className="text-xs text-slate/70">
-                    {folder.path}
-                  </p>
-                </div>
-              ))}
+              {folders.length === 0 ? (
+                <EmptyState
+                  title="No folders yet"
+                  description="Add a folder to scope workflows to a project."
+                  testId="folder-empty-state"
+                />
+              ) : (
+                folders.map((folder) => (
+                  <div
+                    data-testid={`folder-card-${folder.id}`}
+                    key={folder.id}
+                    className="rounded-lg border border-slate/10 bg-white p-3"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p data-testid={`folder-card-${folder.id}-label`} className="text-sm font-semibold text-slate/80">
+                          {folder.label || "Untitled folder"}
+                        </p>
+                        <p data-testid={`folder-card-${folder.id}-path`} className="text-xs text-slate/70">
+                          {folder.path}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <GhostButton
+                          label="Edit"
+                          onClick={() => openEditFolderModal(folder)}
+                          testId={`folder-card-${folder.id}-edit`}
+                          disabled={configLocked}
+                        />
+                        <GhostButton
+                          label="Delete"
+                          onClick={() => handleDeleteFolder(folder.id)}
+                          testId={`folder-card-${folder.id}-delete`}
+                          disabled={configLocked}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </Section>
 
           <Section title="Workflow Builder" testId="section-workflow">
-            <Field label="Name" value={workflowName} onChange={setWorkflowName} testId="workflow-name" />
+            <Field
+              label="Name"
+              value={workflowName}
+              onChange={setWorkflowName}
+              testId="workflow-name"
+              disabled={configLocked}
+            />
             <TextArea
               label="Description"
               value={workflowDescription}
               onChange={setWorkflowDescription}
               testId="workflow-description"
+              disabled={configLocked}
             />
             <SelectField
               label="Folder"
@@ -1018,6 +1120,7 @@ export default function App() {
               onChange={setWorkflowFolderId}
               options={[{ label: "Select folder", value: "" }, ...folders.map((f) => ({ label: f.path, value: f.id }))]}
               testId="workflow-folder"
+              disabled={configLocked}
             />
             <SelectField
               label="Execution Mode"
@@ -1028,8 +1131,14 @@ export default function App() {
                 { label: "Parallel", value: "parallel" }
               ]}
               testId="workflow-mode"
+              disabled={configLocked}
             />
-            <PrimaryButton label="Create Workflow" onClick={handleCreateWorkflow} testId="workflow-create" />
+            <PrimaryButton
+              label="Create Workflow"
+              onClick={handleCreateWorkflow}
+              testId="workflow-create"
+              disabled={configLocked}
+            />
             <div data-testid="workflow-list" className="space-y-2">
               {workflows.map((workflow) => (
                 <div
@@ -1055,6 +1164,7 @@ export default function App() {
                     label="Delete"
                     onClick={() => handleDeleteWorkflow(workflow.id)}
                     testId={`workflow-card-${workflow.id}-delete`}
+                    disabled={configLocked}
                   />
                 </div>
               ))}
@@ -1066,12 +1176,19 @@ export default function App() {
           <Section title="Steps" testId="section-steps">
             <div data-testid="steps-grid" className="grid gap-4 md:grid-cols-2">
               <div data-testid="steps-form" className="space-y-3">
-                <Field label="Step Name" value={stepName} onChange={setStepName} testId="step-name" />
+                <Field
+                  label="Step Name"
+                  value={stepName}
+                  onChange={setStepName}
+                  testId="step-name"
+                  disabled={configLocked}
+                />
                 <TextArea
                   label="Description"
                   value={stepDescription}
                   onChange={setStepDescription}
                   testId="step-description"
+                  disabled={configLocked}
                 />
                 <SelectField
                   label="Provider"
@@ -1079,6 +1196,7 @@ export default function App() {
                   onChange={setStepProviderId}
                   options={[{ label: "Select provider", value: "" }, ...providers.map((p) => ({ label: p.name, value: p.id }))]}
                   testId="step-provider"
+                  disabled={configLocked}
                 />
                 <Field
                   label="Model"
@@ -1086,12 +1204,14 @@ export default function App() {
                   onChange={setStepModel}
                   placeholder="Leave empty for provider default"
                   testId="step-model"
+                  disabled={configLocked}
                 />
                 <Field
                   label="Max Iterations"
                   value={stepIterations}
                   onChange={setStepIterations}
                   testId="step-iterations"
+                  disabled={configLocked}
                 />
                 <TagInput
                   label="Skills"
@@ -1099,20 +1219,23 @@ export default function App() {
                   onChange={setStepSkills}
                   placeholder="build-report.sh, analyze.sh"
                   testId="step-skills"
+                  disabled={configLocked}
                 />
                 <TextArea
                   label="Success Criteria"
                   value={stepSuccess}
                   onChange={setStepSuccess}
                   testId="step-success"
+                  disabled={configLocked}
                 />
                 <TextArea
                   label="Failure Criteria"
                   value={stepFailure}
                   onChange={setStepFailure}
                   testId="step-failure"
+                  disabled={configLocked}
                 />
-                <PrimaryButton label="Add Step" onClick={handleCreateStep} testId="step-add" />
+                <PrimaryButton label="Add Step" onClick={handleCreateStep} testId="step-add" disabled={configLocked} />
               </div>
               <div data-testid="steps-list" className="space-y-2">
                 {steps.map((step) => (
@@ -1139,6 +1262,7 @@ export default function App() {
                       label="Delete"
                       onClick={() => handleDeleteStep(step.id)}
                       testId={`step-card-${step.id}-delete`}
+                      disabled={configLocked}
                     />
                   </div>
                 ))}
@@ -1154,6 +1278,7 @@ export default function App() {
                 onChange={setEdgeFrom}
                 options={[{ label: "Select step", value: "" }, ...steps.map((s) => ({ label: s.name, value: s.id }))]}
                 testId="edge-from"
+                disabled={configLocked}
               />
               <SelectField
                 label="To"
@@ -1161,6 +1286,7 @@ export default function App() {
                 onChange={setEdgeTo}
                 options={[{ label: "Select step", value: "" }, ...steps.map((s) => ({ label: s.name, value: s.id }))]}
                 testId="edge-to"
+                disabled={configLocked}
               />
               <SelectField
                 label="Type"
@@ -1173,9 +1299,10 @@ export default function App() {
                   { label: "Failure", value: "failure" }
                 ]}
                 testId="edge-type"
+                disabled={configLocked}
               />
             </div>
-            <PrimaryButton label="Add Connection" onClick={handleCreateEdge} testId="edge-add" />
+            <PrimaryButton label="Add Connection" onClick={handleCreateEdge} testId="edge-add" disabled={configLocked} />
             <div data-testid="edge-list" className="space-y-2">
               {edges.map((edge) => (
                 <div data-testid={`edge-card-${edge.id}`} key={edge.id} className="rounded-lg border border-slate/10 p-3">
@@ -1186,6 +1313,7 @@ export default function App() {
                     label="Delete"
                     onClick={() => handleDeleteEdge(edge.id)}
                     testId={`edge-card-${edge.id}-delete`}
+                    disabled={configLocked}
                   />
                 </div>
               ))}
@@ -1200,8 +1328,11 @@ export default function App() {
                 edges={flowEdges}
                 nodeTypes={nodeTypes}
                 onNodesChange={onNodesChange}
+                onNodeDragStop={onNodeDragStop}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
+                nodesDraggable={!configLocked}
+                nodesConnectable={!configLocked}
                 onNodeClick={(_, node) => setSelectedStepId(node.id)}
                 fitView
               >
@@ -1244,6 +1375,90 @@ export default function App() {
           )}
         </section>
       </main>
+
+      <Modal
+        title={providerModalTitle}
+        open={isProviderModalOpen}
+        onClose={() => setIsProviderModalOpen(false)}
+        testId="provider-modal"
+      >
+        <SelectField
+          label="Preset"
+          value={providerPresetKey}
+          onChange={(value) => setProviderPresetKey(value as "claude" | "codex" | "custom")}
+          options={[
+            { label: "Claude Code", value: "claude" },
+            { label: "OpenAI Codex", value: "codex" },
+            { label: "Custom", value: "custom" }
+          ]}
+          testId="provider-preset"
+          disabled={configLocked}
+        />
+        <Field label="Name" value={providerName} onChange={setProviderName} testId="provider-name" disabled={configLocked} />
+        <Field
+          label="CLI Command"
+          value={providerCli}
+          onChange={setProviderCli}
+          testId="provider-cli"
+          disabled={configLocked}
+        />
+        <TextArea
+          label="Command Template"
+          value={providerTemplate}
+          onChange={setProviderTemplate}
+          placeholder='--model {{model}} --prompt "{{prompt}}"'
+          testId="provider-template"
+          disabled={configLocked}
+        />
+        <Field
+          label="Default Model"
+          value={providerModel}
+          onChange={setProviderModel}
+          placeholder="Leave empty for CLI default"
+          testId="provider-model"
+          disabled={configLocked}
+        />
+        <TextArea
+          label={editingProviderId ? "Env Vars (JSON) - leave empty to keep existing" : "Env Vars (JSON)"}
+          value={providerEnvJson}
+          onChange={setProviderEnvJson}
+          placeholder='{"KEY":"value"}'
+          testId="provider-env"
+          disabled={configLocked}
+        />
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <GhostButton label="Cancel" onClick={() => setIsProviderModalOpen(false)} testId="provider-cancel" />
+          <PrimaryButton label={providerSaveLabel} onClick={handleSaveProvider} testId="provider-save" disabled={configLocked} />
+        </div>
+      </Modal>
+
+      <Modal
+        title={folderModalTitle}
+        open={isFolderModalOpen}
+        onClose={() => setIsFolderModalOpen(false)}
+        testId="folder-modal"
+      >
+        <Field
+          label="Label"
+          value={folderLabel}
+          onChange={setFolderLabel}
+          placeholder="Team Alpha"
+          testId="folder-label"
+          disabled={configLocked}
+        />
+        <Field
+          label="Folder Path"
+          value={folderPath}
+          onChange={setFolderPath}
+          placeholder="/path/to/project"
+          testId="folder-path"
+          disabled={configLocked}
+        />
+        <div className="flex items-center justify-end gap-2 pt-2">
+          <GhostButton label="Cancel" onClick={() => setIsFolderModalOpen(false)} testId="folder-cancel" />
+          <PrimaryButton label={folderSaveLabel} onClick={handleSaveFolder} testId="folder-save" disabled={configLocked} />
+        </div>
+      </Modal>
     </div>
   );
 }
