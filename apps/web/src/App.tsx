@@ -23,7 +23,9 @@ import {
   executeWorkflow,
   getVaultStatus,
   getRun,
+  getRunStatuses,
   getWorkflow,
+  listRuns,
   lockVault,
   listFolders,
   listProviders,
@@ -38,7 +40,10 @@ import {
   Folder,
   Provider,
   ProviderPresetKey,
+  Run,
   Step,
+  StepRun,
+  StepStatusSummary,
   Workflow
 } from "./types";
 import AppHeader from "./components/layout/AppHeader";
@@ -78,9 +83,12 @@ export default function App() {
   const [edges, setEdges] = useState<EdgeRecord[]>([]);
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [editingStepId, setEditingStepId] = useState<string | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<string>("");
-  const [runSteps, setRunSteps] = useState<any[]>([]);
+  const [runSteps, setRunSteps] = useState<StepRun[]>([]);
+  const [runs, setRuns] = useState<Run[]>([]);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [runStatusSummaries, setRunStatusSummaries] = useState<StepStatusSummary[]>([]);
+  const [runStatusRuns, setRunStatusRuns] = useState<Run[]>([]);
 
   const [providerPresetKey, setProviderPresetKey] = useState<ProviderPresetKey>("claude");
   const [providerName, setProviderName] = useState(providerPresets.claude.name);
@@ -367,6 +375,8 @@ export default function App() {
       setSteps(data.steps);
       setEdges(data.edges);
       clearStepSelection();
+      await refreshRuns(id);
+      await refreshRunStatuses(id);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -483,8 +493,10 @@ export default function App() {
     setErrorMessage("");
     try {
       const { runId } = await executeWorkflow(selectedWorkflowId, goalText);
-      setRunId(runId);
+      setSelectedRunId(runId);
+      await refreshRuns(selectedWorkflowId);
       await refreshRun(runId);
+      await refreshRunStatuses(selectedWorkflowId);
     } catch (err) {
       setErrorMessage((err as Error).message);
     }
@@ -500,17 +512,131 @@ export default function App() {
     }
   }
 
-  const nodes = useMemo<Node[]>(() => {
-    return steps.map((step) => ({
-      id: step.id,
-      type: "default",
-      position: { x: step.pos_x, y: step.pos_y },
-      data: {
-        name: step.name,
-        provider: providers.find((p) => p.id === step.provider_id)?.name || "provider"
+  async function refreshRuns(workflowId: string) {
+    try {
+      const data = await listRuns(workflowId, 10);
+      setRuns(data.runs as Run[]);
+      if (!selectedRunId && data.runs.length > 0) {
+        setSelectedRunId(data.runs[0].id);
       }
-    }));
-  }, [steps, providers]);
+    } catch (err) {
+      setErrorMessage((err as Error).message);
+    }
+  }
+
+  async function refreshRunStatuses(workflowId: string) {
+    try {
+      const data = await getRunStatuses(workflowId, 5);
+      setRunStatusSummaries(data.stepStatuses as StepStatusSummary[]);
+      setRunStatusRuns(data.runs as Run[]);
+    } catch (err) {
+      setErrorMessage((err as Error).message);
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedWorkflowId) return;
+    refreshRuns(selectedWorkflowId);
+    refreshRunStatuses(selectedWorkflowId);
+  }, [selectedWorkflowId]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
+      setRunStatus("");
+      setRunSteps([]);
+      return;
+    }
+    refreshRun(selectedRunId);
+  }, [selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedWorkflowId) return;
+    const hasActiveRun = runs.some((run) => run.status === "running" || run.status === "needs_input");
+    if (!hasActiveRun) return;
+    const interval = setInterval(() => {
+      refreshRuns(selectedWorkflowId);
+      refreshRunStatuses(selectedWorkflowId);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [runs, selectedWorkflowId]);
+
+  useEffect(() => {
+    if (!selectedRunId) return;
+    if (runStatus !== "running" && runStatus !== "needs_input") return;
+    const interval = setInterval(() => refreshRun(selectedRunId), 2000);
+    return () => clearInterval(interval);
+  }, [selectedRunId, runStatus]);
+
+  const nodes = useMemo<Node[]>(() => {
+    const runMap = new Map(runStatusRuns.map((run) => [run.id, run]));
+    const stepStatusMap = new Map<string, Map<string, StepStatusSummary>>();
+    for (const summary of runStatusSummaries) {
+      if (!stepStatusMap.has(summary.run_id)) {
+        stepStatusMap.set(summary.run_id, new Map());
+      }
+      const existing = stepStatusMap.get(summary.run_id)!.get(summary.step_id);
+      if (!existing || summary.created_at > existing.created_at) {
+        stepStatusMap.get(summary.run_id)!.set(summary.step_id, summary);
+      }
+    }
+
+    const selectedRunStepsMap = new Map(runSteps.map((stepRun) => [stepRun.step_id, stepRun]));
+
+    const allRuns = runStatusRuns;
+    const overflowCount = Math.max(0, runs.length - allRuns.length);
+
+    function deriveState(run: Run | undefined, summary?: StepStatusSummary, stdout?: string) {
+      if (!run) return "not_started";
+      if (!summary) {
+        return run.status === "running" || run.status === "needs_input" ? "pending" : "not_started";
+      }
+      if (summary.status === "running") {
+        return stdout && stdout.length > 0 ? "in_progress" : "started";
+      }
+      if (summary.status === "failed") return "error";
+      if (summary.status === "needs_input") return "needs_input";
+      return "success";
+    }
+
+    return steps.map((step) => {
+      const statusIndicators =
+        allRuns.length > 0
+          ? allRuns.map((run) => {
+              const summary = stepStatusMap.get(run.id)?.get(step.id);
+              const isSelected = run.id === selectedRunId;
+              const selectedStepRun = selectedRunStepsMap.get(step.id);
+              const stdout = isSelected ? selectedStepRun?.stdout ?? "" : "";
+              return {
+                runId: run.id,
+                state: deriveState(runMap.get(run.id), summary, stdout),
+                isSelected
+              };
+            })
+          : [
+              {
+                runId: "no-run",
+                state: "not_started",
+                isSelected: true
+              }
+            ];
+
+      return {
+        id: step.id,
+        type: "default",
+        position: { x: step.pos_x, y: step.pos_y },
+        data: {
+          name: step.name,
+          provider: providers.find((p) => p.id === step.provider_id)?.name || "provider",
+          description: step.description,
+          model: step.model ?? "default",
+          maxIterations: step.max_iterations,
+          skills: parseStepSkills(step),
+          statusIndicators,
+          overflowCount
+        }
+      };
+    });
+  }, [steps, providers, runStatusRuns, runStatusSummaries, runSteps, selectedRunId, runs.length]);
 
   const flowEdges = useMemo<Edge[]>(() => {
     return edges.map((edge) => {
@@ -720,9 +846,16 @@ export default function App() {
             goalText={goalText}
             setGoalText={setGoalText}
             handleExecute={handleExecute}
-            runId={runId}
+            runId={selectedRunId}
             runStatus={runStatus}
             runSteps={runSteps}
+            runs={runs}
+            selectedRunId={selectedRunId}
+            setSelectedRunId={(id) => {
+              setSelectedRunId(id || null);
+              if (id) refreshRun(id);
+            }}
+            stepNameById={Object.fromEntries(steps.map((step) => [step.id, step.name]))}
             refreshRun={refreshRun}
           />
 

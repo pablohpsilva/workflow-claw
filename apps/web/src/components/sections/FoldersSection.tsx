@@ -5,6 +5,33 @@ import PrimaryButton from "../ui/PrimaryButton";
 import GhostButton from "../ui/GhostButton";
 import EmptyState from "../ui/EmptyState";
 
+function truncatePathStart(value: string, maxChars = 60, maxSegments = 2): string {
+  if (value.length <= maxChars) {
+    return value;
+  }
+  const separator = value.includes("\\") ? "\\" : "/";
+  const parts = value.split(/[\\/]+/).filter(Boolean);
+  if (parts.length === 0) {
+    return value.slice(Math.max(0, value.length - maxChars));
+  }
+  let tail = parts.slice(-Math.min(maxSegments, parts.length)).join(separator);
+  let result = `...${separator}${tail}`;
+  if (result.length <= maxChars || parts.length === 1) {
+    if (result.length <= maxChars) {
+      return result;
+    }
+    const keep = Math.max(1, maxChars - 3);
+    return `...${parts[parts.length - 1].slice(-keep)}`;
+  }
+  tail = parts.slice(-1).join(separator);
+  result = `...${separator}${tail}`;
+  if (result.length <= maxChars) {
+    return result;
+  }
+  const keep = Math.max(1, maxChars - 3);
+  return `...${tail.slice(-keep)}`;
+}
+
 export default function FoldersSection({
   folders,
   configLocked,
@@ -46,13 +73,18 @@ export default function FoldersSection({
               key={folder.id}
               className="rounded-lg border border-slate/10 bg-white p-3"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3">
+                <div className="min-w-0">
                   <p data-testid={`folder-card-${folder.id}-label`} className="text-sm font-semibold text-slate/80">
                     {folder.label || "Untitled folder"}
                   </p>
-                  <p data-testid={`folder-card-${folder.id}-path`} className="text-xs text-slate/70">
-                    {folder.path}
+                  <p
+                    data-testid={`folder-card-${folder.id}-path`}
+                    className="text-xs text-slate/70 whitespace-nowrap"
+                    title={folder.path}
+                    aria-label={folder.path}
+                  >
+                    {truncatePathStart(folder.path)}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

@@ -46,6 +46,12 @@ function mockFetch({
       const detail = workflowDetails[workflowId] ?? { workflow: null, steps: [], edges: [] };
       return new Response(JSON.stringify(detail), { status: 200 });
     }
+    if (url.match(/\/api\/workflows\/[^/]+\/runs/)) {
+      return new Response(JSON.stringify({ runs: [] }), { status: 200 });
+    }
+    if (url.match(/\/api\/workflows\/[^/]+\/run-statuses/)) {
+      return new Response(JSON.stringify({ runs: [], stepStatuses: [] }), { status: 200 });
+    }
     if (url.endsWith("/api/vault")) {
       return new Response(JSON.stringify({ unlocked }), { status: 200 });
     }

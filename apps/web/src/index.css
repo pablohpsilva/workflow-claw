@@ -18,10 +18,13 @@ body {
 
 .react-flow__node {
   border-radius: 12px;
-  border: 1px solid #1e1f24;
-  padding: 12px;
-  background: #fff;
-  box-shadow: 0 10px 30px rgba(11, 11, 12, 0.08);
+  border: 1px solid transparent;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .react-flow__edge-path {

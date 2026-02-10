@@ -308,6 +308,16 @@ async function executeStep({
     "insert into step_runs (id, run_id, step_id, status, iteration, created_at) values (?, ?, ?, ?, ?, ?)"
   ).run(stepRunId, runId, step.id, "running", iteration, now());
 
+  let stdoutBuffer = "";
+  let pendingBuffer = "";
+  let lastFlush = 0;
+  const flushOutput = (force = false) => {
+    if (!force && pendingBuffer.length === 0) return;
+    db.prepare("update step_runs set stdout = ? where id = ?").run(stdoutBuffer, stepRunId);
+    pendingBuffer = "";
+    lastFlush = Date.now();
+  };
+
   const result = await runCli({
     cliCommand: provider.cli_command,
     template: provider.template,
@@ -317,9 +327,18 @@ async function executeStep({
     cwd: folderPath,
     stepName: step.name,
     prdPath,
-    memoryPath: getMemoryPath(folderPath)
+    memoryPath: getMemoryPath(folderPath),
+    onData: (chunk) => {
+      stdoutBuffer += chunk;
+      pendingBuffer += chunk;
+      const nowMs = Date.now();
+      if (pendingBuffer.length >= 1024 || nowMs - lastFlush >= 250) {
+        flushOutput();
+      }
+    }
   });
 
+  flushOutput(true);
   const output = parseStepOutput(result.stdout);
   await appendAgentUpdate(prdPath, step.name, output);
 

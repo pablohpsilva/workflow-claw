@@ -47,4 +47,33 @@ export type EdgeRecord = {
   type: "next" | "support" | "callback" | "failure";
 };
 
+export type Run = {
+  id: string;
+  workflow_id: string;
+  status: "running" | "success" | "failed" | "needs_input";
+  goal: string;
+  started_at: string;
+  ended_at: string | null;
+};
+
+export type StepRun = {
+  id: string;
+  run_id: string;
+  step_id: string;
+  status: "running" | "success" | "failed" | "needs_input";
+  iteration: number;
+  stdout: string | null;
+  stderr: string | null;
+  summary: string | null;
+  created_at: string;
+};
+
+export type StepStatusSummary = {
+  run_id: string;
+  step_id: string;
+  status: "running" | "success" | "failed" | "needs_input";
+  iteration: number;
+  created_at: string;
+};
+
 export type ProviderPresetKey = "claude" | "codex" | "custom";

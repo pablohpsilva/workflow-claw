@@ -192,6 +192,18 @@ export async function executeWorkflow(workflowId: string, goal: string) {
   });
 }
 
+export async function listRuns(workflowId: string, limit = 10) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<{ runs: any[] }>(`/api/workflows/${workflowId}/runs?${params.toString()}`);
+}
+
+export async function getRunStatuses(workflowId: string, limit = 5) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  return request<{ runs: any[]; stepStatuses: any[] }>(
+    `/api/workflows/${workflowId}/run-statuses?${params.toString()}`
+  );
+}
+
 export async function getRun(runId: string) {
   return request<{ run: any; steps: any[] }>(`/api/runs/${runId}`);
 }

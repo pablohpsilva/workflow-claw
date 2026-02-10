@@ -414,6 +414,40 @@ server.post("/api/workflows/:id/execute", async (request, reply) => {
   return { runId };
 });
 
+server.get("/api/workflows/:id/runs", async (request) => {
+  const db = getDb();
+  const id = z.string().parse((request.params as any).id);
+  const limit = z
+    .object({ limit: z.coerce.number().int().min(1).max(50).optional() })
+    .parse(request.query ?? {}).limit ?? 10;
+  const runs = db
+    .prepare("select * from runs where workflow_id = ? order by started_at desc limit ?")
+    .all(id, limit);
+  return { runs };
+});
+
+server.get("/api/workflows/:id/run-statuses", async (request) => {
+  const db = getDb();
+  const id = z.string().parse((request.params as any).id);
+  const limit = z
+    .object({ limit: z.coerce.number().int().min(1).max(20).optional() })
+    .parse(request.query ?? {}).limit ?? 5;
+  const runs = db
+    .prepare("select * from runs where workflow_id = ? order by started_at desc limit ?")
+    .all(id, limit) as Array<{ id: string }>;
+  if (runs.length === 0) {
+    return { runs: [], stepStatuses: [] };
+  }
+  const runIds = runs.map((run) => run.id);
+  const placeholders = runIds.map(() => "?").join(", ");
+  const stepStatuses = db
+    .prepare(
+      `select run_id, step_id, status, iteration, created_at from step_runs where run_id in (${placeholders})`
+    )
+    .all(...runIds);
+  return { runs, stepStatuses };
+});
+
 server.get("/api/runs/:id", async (request, reply) => {
   const db = getDb();
   const id = z.string().parse((request.params as any).id);
