@@ -114,7 +114,21 @@ server.put("/api/providers/:id", async (request, reply) => {
 server.delete("/api/providers/:id", async (request, reply) => {
   const db = getDb();
   const id = z.string().parse((request.params as any).id);
-  db.prepare("delete from providers where id = ?").run(id);
+  const deleteProvider = db.transaction((providerId: string) => {
+    const stepIds = db
+      .prepare("select id from steps where provider_id = ?")
+      .all(providerId)
+      .map((row: any) => row.id);
+    if (stepIds.length > 0) {
+      const placeholders = stepIds.map(() => "?").join(", ");
+      db.prepare(`delete from edges where from_step_id in (${placeholders}) or to_step_id in (${placeholders})`)
+        .run(...stepIds, ...stepIds);
+      db.prepare(`delete from step_runs where step_id in (${placeholders})`).run(...stepIds);
+      db.prepare(`delete from steps where id in (${placeholders})`).run(...stepIds);
+    }
+    db.prepare("delete from providers where id = ?").run(providerId);
+  });
+  deleteProvider(id);
   reply.code(204);
 });
 
@@ -182,12 +196,29 @@ server.delete("/api/folders/:id", async (request, reply) => {
     reply.code(404);
     return { error: "Not found" };
   }
-  const inUse = db.prepare("select id from workflows where folder_id = ? limit 1").get(id);
-  if (inUse) {
-    reply.code(409);
-    return { error: "Folder in use" };
-  }
-  db.prepare("delete from folders where id = ?").run(id);
+  const deleteFolder = db.transaction((folderId: string) => {
+    const workflowIds = db
+      .prepare("select id from workflows where folder_id = ?")
+      .all(folderId)
+      .map((row: any) => row.id);
+    if (workflowIds.length > 0) {
+      const placeholders = workflowIds.map(() => "?").join(", ");
+      const runIds = db
+        .prepare(`select id from runs where workflow_id in (${placeholders})`)
+        .all(...workflowIds)
+        .map((row: any) => row.id);
+      if (runIds.length > 0) {
+        const runPlaceholders = runIds.map(() => "?").join(", ");
+        db.prepare(`delete from step_runs where run_id in (${runPlaceholders})`).run(...runIds);
+        db.prepare(`delete from runs where id in (${runPlaceholders})`).run(...runIds);
+      }
+      db.prepare(`delete from edges where workflow_id in (${placeholders})`).run(...workflowIds);
+      db.prepare(`delete from steps where workflow_id in (${placeholders})`).run(...workflowIds);
+      db.prepare(`delete from workflows where id in (${placeholders})`).run(...workflowIds);
+    }
+    db.prepare("delete from folders where id = ?").run(folderId);
+  });
+  deleteFolder(id);
   reply.code(204);
 });
 
@@ -252,7 +283,21 @@ server.put("/api/workflows/:id", async (request, reply) => {
 server.delete("/api/workflows/:id", async (request, reply) => {
   const db = getDb();
   const id = z.string().parse((request.params as any).id);
-  db.prepare("delete from workflows where id = ?").run(id);
+  const deleteWorkflow = db.transaction((workflowId: string) => {
+    const runIds = db
+      .prepare("select id from runs where workflow_id = ?")
+      .all(workflowId)
+      .map((row: any) => row.id);
+    if (runIds.length > 0) {
+      const runPlaceholders = runIds.map(() => "?").join(", ");
+      db.prepare(`delete from step_runs where run_id in (${runPlaceholders})`).run(...runIds);
+      db.prepare(`delete from runs where id in (${runPlaceholders})`).run(...runIds);
+    }
+    db.prepare("delete from edges where workflow_id = ?").run(workflowId);
+    db.prepare("delete from steps where workflow_id = ?").run(workflowId);
+    db.prepare("delete from workflows where id = ?").run(workflowId);
+  });
+  deleteWorkflow(id);
   reply.code(204);
 });
 
