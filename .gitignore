@@ -1,0 +1,9 @@
+node_modules
+.DS_Store
+*.log
+apps/*/dist
+apps/*/.vite
+apps/web/test-results/
+.e2e-data/
+.e2e-project/
+.playwright-cli/

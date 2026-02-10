@@ -1,0 +1,16 @@
+{
+  "name": "workflow-claw",
+  "private": true,
+  "packageManager": "pnpm@9.12.1",
+  "scripts": {
+    "dev": "pnpm -r dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:server": "pnpm --filter server dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "test:unit": "pnpm -r test:unit",
+    "test:e2e": "pnpm -r test:e2e",
+    "test:all": "pnpm -r test:all"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@workflow-claw/shared",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "echo 'no lint configured'",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:unit": "echo 'no tests'",
+    "test:e2e": "echo 'no e2e'",
+    "test:all": "pnpm typecheck"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  }
+}
